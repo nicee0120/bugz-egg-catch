@@ -104,6 +104,8 @@
 </div>
 
 <script>
+(() => {
+'use strict';
 // Put your game link here after deploying (e.g. https://your-game.vercel.app) so shares include it
 const GAME_URL = '';
 const CREATOR = 'nice012023', CREATOR_URL = 'https://x.com/nice012023';
@@ -614,6 +616,9 @@ function drawIconsSafe(){
   });
 }
 function withCtx(c, fn){ const saved = ctx; ctx = c; try { fn(); } finally { ctx = saved; } }
+
+window.__bugz = { get state(){ return state; } };
+})();
 </script>
 </body>
 </html>
