@@ -42,6 +42,22 @@
   .stat{background:rgba(255,255,255,.08);border-radius:14px;padding:8px 16px;font-weight:900}
   .stat span{display:block;font-family:'Lilita One';font-size:26px;font-weight:400;color:var(--orange)}
   .hidden{display:none!important}
+  #peek{position:absolute;right:0;bottom:0;z-index:6;pointer-events:none;transform:translateX(110%);transition:transform .55s cubic-bezier(.2,1.4,.4,1)}
+  #peek.show{transform:translateX(0)}
+  #peekCv{display:block;width:min(30vw,250px);height:auto}
+  #bubble{position:absolute;right:calc(min(30vw,250px) * .42);bottom:calc(min(30vw,250px) * 1.06);width:max-content;max-width:min(46vw,280px);
+    background:#fff;color:#2a1240;font-family:'Lilita One',sans-serif;font-size:clamp(15px,2.2vw,21px);line-height:1.2;padding:12px 16px;border-radius:18px;
+    border:4px solid #2a1240;box-shadow:0 5px 0 rgba(0,0,0,.35);transform:scale(0);transform-origin:85% 100%;transition:transform .35s cubic-bezier(.2,1.6,.4,1) .45s}
+  #bubble:after{content:'';position:absolute;right:26px;bottom:-18px;border:12px solid transparent;border-top:16px solid #2a1240;border-bottom:0}
+  #bubble:before{content:'';position:absolute;right:29px;bottom:-11px;border:9px solid transparent;border-top:12px solid #fff;border-bottom:0;z-index:1}
+  #peek.show #bubble{transform:scale(1)}
+  #peek.inline{position:relative;right:auto;bottom:auto;display:flex;align-items:flex-end;justify-content:center;gap:6px;margin:14px auto 0;transform:translateY(40px);opacity:0;transition:transform .5s cubic-bezier(.2,1.4,.4,1),opacity .3s}
+  #peek.inline.show{transform:none;opacity:1}
+  #peek.inline #peekCv{width:120px}
+  #peek.inline #bubble{position:relative;right:auto;bottom:auto;margin-bottom:34px;max-width:min(64vw,300px);font-size:15px;transform-origin:100% 100%}
+  #peek.inline #bubble:after{right:-14px;bottom:12px;border:12px solid transparent;border-left:16px solid #2a1240;border-right:0}
+  #peek.inline #bubble:before{right:-8px;bottom:15px;border:9px solid transparent;border-left:12px solid #fff;border-right:0}
+  .overlay{overflow-y:auto}
   .madeby{display:inline-block;margin-top:14px;font-weight:900;font-size:14px;color:#fff;opacity:.85;text-decoration:none;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.15);border-radius:999px;padding:6px 14px}
   .madeby b{color:var(--orange)} .madeby:hover{opacity:1;border-color:var(--orange)}
   #credit{position:absolute;right:12px;bottom:34px;z-index:3;font-size:12px;font-weight:900;color:#fff;opacity:.7;text-decoration:none;background:rgba(20,10,30,.6);padding:4px 10px;border-radius:999px}
@@ -77,14 +93,15 @@
         <div class="rule bad"><canvas class="ico" data-ico="rock"></canvas><div><b>−15 / −20 / −25</b><br>Dodge rocks, red candles & spikes</div></div>
         <div class="rule mag"><canvas class="ico" data-ico="magnet"></canvas><div><b>MAGNET</b><br>Pulls eggs in for 5s</div></div>
         <div class="rule fren"><span class="ico emo">🔥</span><div><b>20 COMBO</b><br>BUGZ FRENZY · x3 egg rain</div></div>
-        <div class="rule dep"><canvas class="ico" data-ico="vault"></canvas><div><b>+100</b><br>Fill the nest (10) → vault deposit</div></div>
+        <div class="rule dep"><canvas class="ico" data-ico="vault"></canvas><div><b>+100</b><br>Catch 10 → send them to the top nest</div></div>
       </div>
       <button class="play" id="playBtn">PLAY</button>
-      <div class="keys">← → / A D to move · or drag on the screen</div>
+      <div class="keys">Move with your mouse · ← → / A D · or drag on mobile</div>
       <a class="madeby" href="https://x.com/nice012023" target="_blank" rel="noopener">made by <b>@nice012023</b></a>
     </div>
   </div>
 
+  <div id="peek"><div id="bubble"></div><canvas id="peekCv" width="500" height="560"></canvas></div>
   <div class="overlay hidden" id="over">
     <div class="card">
       <div class="sub" style="margin-bottom:4px">TIME'S UP!</div>
@@ -158,11 +175,15 @@ document.getElementById('mute').onclick = e => { muted = !muted; e.currentTarget
 const EGGS = ['purple','magenta','teal','obsidian','blue','crimson','cyan'];
 let state = 'menu', T = 0, timeLeft = 60, score = 0, shownScore = 0, combo = 0, bestCombo = 0, eggsCaught = 0, hits = 0;
 let objs = [], parts = [], floats = [], nestEggs = [], spawnT = 0, shake = 0, flashBad = 0, shieldT = 0, blocked = 0;
+let topEggs = [], topBounce = 0;
 let magnetT = 0, frenzyT = 0, frenzyBeat = 0, nestCount = 0, deposits = 0, fliers = [], vaultFlash = 0;
 const MAGNET_TIME = 5, FRENZY_TIME = 5, NEST_GOAL = 10;
 const SHIELD_TIME = 6;
 const P = { x: 640, vx: 0, dir: 1, face: 'idle', faceT: 0, blink: 0, nextBlink: 2, bob: 0, squash: 0, look: {x:0, y:0} };
-const input = { l: false, r: false, drag: null };
+const input = { l: false, r: false, drag: null, mouse: null };
+const PLAY_MAX = 1150;
+function playArea(){ const w = Math.min(VW, PLAY_MAX); const l = (VW - w) / 2; return { l, r: l + w, w }; }
+let rings = [], splats = [];
 
 const BS = 0.3;           // bug image px -> world
 const NS = 0.75;           // nest scale (in bug px)
@@ -184,7 +205,8 @@ function spawn(){
   const prog = 1 - timeLeft / 60;
   const r = Math.random();
   const badChance = 0.22 + prog * 0.2;
-  let o = { x: 60 + Math.random() * (VW - 120), y: -60, vy: 0, rot: Math.random() * 6, vr: (Math.random() - .5) * 3, wob: Math.random() * 6 };
+  const PA = playArea();
+  let o = { x: PA.l + 60 + Math.random() * (PA.w - 120), y: -60, vy: 0, rot: Math.random() * 6, vr: (Math.random() - .5) * 3, wob: Math.random() * 6 };
   const speed = 170 + prog * 230 + Math.random() * 60;
   o.vy = speed;
   if (frenzyT > 0) { o.kind = Math.random() < .06 ? 'gold' : 'egg'; o.col = EGGS[(Math.random() * EGGS.length) | 0]; o.r = o.kind === 'gold' ? 30 : 26; o.pts = o.kind === 'gold' ? 50 : 10; o.vy = 260 + Math.random() * 140; objs.push(o); return; }
@@ -261,6 +283,21 @@ function drawVaultIcon(x, y, r, prog, flash){
   ctx.strokeStyle = '#2a1638'; ctx.lineWidth = 4; for (let k = 0; k < 4; k++) { const a = k * Math.PI / 4 + T * .3 * (flash > 0 ? 8 : 0); ctx.beginPath(); ctx.moveTo(-Math.cos(a) * r * .6, -Math.sin(a) * r * .6); ctx.lineTo(Math.cos(a) * r * .6, Math.sin(a) * r * .6); ctx.stroke(); }
   ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.arc(0, 0, r * .26, 0, 7); ctx.fill();
   ctx.restore();
+}
+function drawTopNest(x, y, prog, flash){
+  const w = 150, nh = A.nestH * (w / 560);
+  ctx.save();
+  if (flash > 0) { const g = ctx.createRadialGradient(x, y, 0, x, y, 170); g.addColorStop(0, `rgba(255,200,90,${.75 * flash})`); g.addColorStop(1, 'rgba(255,200,90,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 170, 0, 7); ctx.fill(); }
+  const sq = 1 + topBounce * .12;
+  ctx.translate(x, y); ctx.scale(sq, 2 - sq);
+  ctx.drawImage(IMG.nest_b, -w / 2, -nh * .35, w, nh);
+  topEggs.forEach((e, i) => drawEgg(e.col, e.ox, -nh * .35 + A.nestRim * (w / 560) * .45 - 14 + Math.max(0, e.drop) * -80, 40, e.rot));
+  ctx.drawImage(IMG.nest_f, -w / 2, -nh * .35, w, nh);
+  ctx.restore();
+  // progress bar
+  const bw = 120, by = y + nh * .7;
+  ctx.fillStyle = 'rgba(20,10,30,.8)'; roundRect(x - bw / 2 - 3, by - 3, bw + 6, 14, 7); ctx.fill();
+  ctx.fillStyle = '#ff7a1a'; if (prog > 0) { roundRect(x - bw / 2, by, bw * prog, 8, 4); ctx.fill(); }
 }
 function drawObj(o){
   if (o.kind === 'egg') drawEgg(o.col, o.x, o.y, 64, Math.sin(o.wob) * .2);
@@ -407,22 +444,24 @@ function frame(now){
   let dt = Math.min(.033, (now - last) / 1000); last = now;
   if (state === 'paused') dt = 0;
   T += dt;
-  update(dt); render();
+  update(dt); render(); drawPeek(dt);
   requestAnimationFrame(frame);
 }
 function update(dt){
   // movement
   const G = bugGeom();
-  const maxV = 900, acc = 5200;
+  const PA = playArea();
+  const maxV = Math.max(1150, PA.w * 1.25), acc = 16000;
   let target = 0;
-  if (input.drag !== null) { const dx = input.drag - P.x; P.vx = Math.max(-maxV * 1.4, Math.min(maxV * 1.4, dx * 12)); }
+  const follow = input.drag !== null ? input.drag : input.mouse;
+  if (follow !== null && !input.l && !input.r) { const dx = follow - P.x; P.vx = Math.max(-maxV * 1.6, Math.min(maxV * 1.6, dx * 16)); if (Math.abs(dx) < 2) P.vx = 0; }
   else {
     if (input.l) target -= maxV; if (input.r) target += maxV;
     const d = target - P.vx; P.vx += Math.sign(d) * Math.min(Math.abs(d), acc * dt);
   }
   if (state !== 'play') { P.vx *= .9; }
   P.x += P.vx * dt;
-  const half = NEST_W * BS * .5 + 10, minX = half + 60 * BS, maxX = VW - half;
+  const half = NEST_W * BS * .5 + 10, minX = PA.l + half + 20, maxX = PA.r - half;
   if (P.x < minX) { P.x = minX; P.vx = 0; } if (P.x > maxX) { P.x = maxX; P.vx = 0; }
   if (P.vx > 40) P.dir = 1; else if (P.vx < -40) P.dir = -1;
   const moving = Math.abs(P.vx) > 60;
@@ -456,9 +495,9 @@ function update(dt){
       if (ad < 560) { const pull = Math.min(ad, (420 + (560 - ad) * 1.4) * dt); o.x += Math.sign(dx) * pull; o.magnet = true; } else o.magnet = false;
     } else o.magnet = false;
     // catch check
-    if (py < G.rimY && o.y >= G.rimY && Math.abs(o.x - P.x) < G.nestHalf * .92 && state === 'play') { caught(o); objs.splice(i, 1); continue; }
+    if (py < G.rimY + 14 && o.y >= G.rimY - 6 && Math.abs(o.x - P.x) < G.nestHalf * 1.12 + (o.r || 26) * .4 && state === 'play') { caught(o); objs.splice(i, 1); continue; }
     if (o.y > ground() - 10) {
-      if (o.kind === 'egg' || o.kind === 'gold') { burst(o.x, ground() - 8, o.kind === 'gold' ? '#ffd23f' : '#ffe9b0', 10, 180); if (state === 'play') { combo = 0; SFX.miss(); } }
+      if (o.kind === 'egg' || o.kind === 'gold') { burst(o.x, ground() - 8, o.kind === 'gold' ? '#ffd23f' : '#ffe9b0', 10, 180); if (state === 'play') { const had = combo; combo = 0; SFX.miss(); splats.push({ x: o.x, col: o.col || 'gold', t: 0 }); floatText(o.x, ground() - 50, had >= 5 ? 'MISS · COMBO LOST' : 'MISS', '#ff8a9a', 30); } }
       else burst(o.x, ground() - 8, '#7d7287', 6, 120);
       objs.splice(i, 1);
     }
@@ -466,8 +505,9 @@ function update(dt){
   parts.forEach(p => { p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 900 * dt; }); parts = parts.filter(p => p.t < p.life);
   floats.forEach(f => { f.t += dt; f.y -= 60 * dt; }); floats = floats.filter(f => f.t < 1.1);
   if (shieldT > 0 && state === 'play') { const before = shieldT; shieldT = Math.max(0, shieldT - dt); if (before > 0 && shieldT === 0) { SFX.shieldDown(); floatText(P.x, bugGeom().top - 40, 'SHIELD OFF', '#9aa7c0', 34); } }
+  rings.forEach(r => r.t += dt); rings = rings.filter(r => r.t < .5); splats.forEach(sp => sp.t += dt); splats = splats.filter(sp => sp.t < 1.2);
   fliers.forEach(f => { f.t += dt; }); fliers = fliers.filter(f => f.t < f.d + f.delay + .05);
-  vaultFlash = Math.max(0, vaultFlash - dt * 1.5);
+  vaultFlash = Math.max(0, vaultFlash - dt * 1.5); topBounce = Math.max(0, topBounce - dt * 4); topEggs.forEach(e => e.drop = Math.max(0, e.drop - dt * 5));
   shake = Math.max(0, shake - dt * 30); flashBad = Math.max(0, flashBad - dt * 2.5);
   shownScore += (score - shownScore) * Math.min(1, dt * 12);
   hud();
@@ -488,6 +528,7 @@ function caught(o){
     floatText(o.x, G.rimY - 40, '+' + pts, o.kind === 'gold' ? '#ffd23f' : '#50ffa0', o.kind === 'gold' ? 54 : 40);
     if (mult > 1 && (combo === 5 || combo === 10)) floatText(P.x, G.top - 30, 'COMBO x' + mult + '!', '#ff7a1a', 46);
     burst(o.x, G.rimY, o.kind === 'gold' ? '#ffd23f' : '#ffffff', o.kind === 'gold' ? 26 : 12, o.kind === 'gold' ? 380 : 220);
+    rings.push({ t: 0, col: o.kind === 'gold' ? '255,210,63' : '80,255,160' }); P.catchFlash = 1;
     P.face = o.kind === 'gold' ? 'wow' : 'happy'; P.faceT = .55; P.squash = 1;
     nestEggs.push({ col: o.kind === 'gold' ? 'gold' : o.col, ox: (Math.random() - .5) * NEST_W * .5, oy: (Math.random() - .5) * 14, rot: (Math.random() - .5) * .5, drop: 1 });
     if (nestEggs.length > 6) nestEggs.shift();
@@ -515,7 +556,7 @@ function deposit(){
   const cols = nestEggs.length ? nestEggs.map(e => e.col) : ['purple'];
   for (let k = 0; k < 10; k++) fliers.push({ col: cols[k % cols.length], x: P.x + (Math.random() - .5) * G.nestHalf, y: G.rimY - 10, t: 0, d: .7, delay: k * .06 });
   nestEggs = [];
-  setTimeout(() => { if (state !== 'play') return; score += 100; vaultFlash = 1; SFX.deposit(); floatText(VW / 2, 240, 'VAULT DEPOSIT +100', '#ff9a3c', 54); burst(VW / 2, 50, '#ffd23f', 30, 340); }, 800);
+  setTimeout(() => { if (state !== 'play') return; score += 100; vaultFlash = 1; SFX.deposit(); floatText(VW / 2, 235, 'VAULT DEPOSIT +100', '#ff9a3c', 54); burst(VW / 2, 52, '#ffd23f', 30, 340); }, 800);
   P.face = 'happy'; P.faceT = 1;
 }
 let lastHud = {};
@@ -532,12 +573,19 @@ function render(){
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
   drawBG();
+  { const PA = playArea(); if (PA.l > 4) { ctx.fillStyle = 'rgba(8,3,14,.55)'; ctx.fillRect(0, 0, PA.l, VH); ctx.fillRect(PA.r, 0, VW - PA.r, VH);
+      ctx.fillStyle = 'rgba(255,122,26,.5)'; ctx.fillRect(PA.l - 2, 0, 3, VH); ctx.fillRect(PA.r - 1, 0, 3, VH); } }
+  splats.forEach(sp => { const a = Math.max(0, 1 - sp.t / 1.2); ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.ellipse(sp.x, ground() - 3, 26, 7, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#ffb63f'; ctx.beginPath(); ctx.ellipse(sp.x + 3, ground() - 4, 9, 4, 0, 0, 7); ctx.fill();
+    drawEgg(sp.col, sp.x - 20, ground() - 12, 26, -1.2); drawEgg(sp.col, sp.x + 22, ground() - 10, 22, 1.4); ctx.restore(); });
   objs.forEach(drawObj);
   if (magnetT > 0) drawMagnetField();
+  { const G = bugGeom(); if ((P.catchFlash || 0) > 0) { P.catchFlash = Math.max(0, P.catchFlash - 1 / 60 * 3); const g = ctx.createRadialGradient(P.x, G.rimY, 0, P.x, G.rimY, G.nestHalf * 2); g.addColorStop(0, `rgba(120,255,180,${.55 * P.catchFlash})`); g.addColorStop(1, 'rgba(120,255,180,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(P.x, G.rimY, G.nestHalf * 2, 0, 7); ctx.fill(); } }
   drawBug();
   drawShield();
+  { const G = bugGeom(); rings.forEach(r => { const q = r.t / .5; ctx.save(); ctx.globalAlpha = 1 - q; ctx.strokeStyle = `rgb(${r.col})`; ctx.lineWidth = 6 * (1 - q) + 1; ctx.beginPath(); ctx.ellipse(P.x, G.rimY, G.nestHalf * (1 + q * 1.2), G.nestHalf * .35 * (1 + q * 1.2), 0, 0, 7); ctx.stroke(); ctx.restore(); }); }
   fliers.forEach(f => { const q = Math.max(0, Math.min(1, (f.t - f.delay) / f.d)); if (f.t < f.delay) return; const e = q * q * (3 - 2 * q);
-    const x = f.x + (VW / 2 - f.x) * e, y = f.y + (50 - f.y) * e - Math.sin(e * Math.PI) * 120; drawEgg(f.col, x, y, 46 * (1 - e * .5), e * 6);
+    if (!f.landed && q >= 1) { f.landed = true; topEggs.push({ col: f.col, ox: (Math.random() - .5) * 70, rot: (Math.random() - .5) * .5, drop: 1 }); if (topEggs.length > 7) topEggs.shift(); topBounce = 1; }
+    const x = f.x + (VW / 2 - f.x) * e, y = f.y + (48 - f.y) * e - Math.sin(e * Math.PI) * 120; drawEgg(f.col, x, y, 46 * (1 - e * .5), e * 6);
     ctx.fillStyle = 'rgba(255,220,120,.5)'; ctx.beginPath(); ctx.arc(x, y + 20, 6 * (1 - e), 0, 7); ctx.fill(); });
   parts.forEach(p => { ctx.globalAlpha = Math.max(0, 1 - p.t / p.life); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); }); ctx.globalAlpha = 1;
   floats.forEach(f => {
@@ -546,13 +594,13 @@ function render(){
     ctx.font = `${f.size}px "Lilita One", sans-serif`; ctx.textAlign = 'center'; ctx.lineWidth = 8; ctx.strokeStyle = '#1a0b22'; ctx.strokeText(f.txt, 0, 0); ctx.fillStyle = f.col; ctx.fillText(f.txt, 0, 0); ctx.restore();
   });
   ctx.restore();
-  if (state === 'play' || state === 'paused' || state === 'over') drawVaultIcon(VW / 2, 50, 26, nestCount / NEST_GOAL, vaultFlash);
-  if (state !== 'menu') { ctx.save(); ctx.font = '18px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#1a0b22'; const tx = `NEST ${nestCount}/${NEST_GOAL}`; ctx.strokeText(tx, VW / 2, 104); ctx.fillStyle = '#ffb070'; ctx.fillText(tx, VW / 2, 104); ctx.restore(); }
+  if (state === 'play' || state === 'paused' || state === 'over') drawTopNest(VW / 2, 52, nestCount / NEST_GOAL, vaultFlash);
+  if (state !== 'menu') { ctx.save(); ctx.font = '18px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 5; ctx.strokeStyle = '#1a0b22'; const tx = `NEST ${nestCount}/${NEST_GOAL}`; ctx.strokeText(tx, VW / 2, 138); ctx.fillStyle = '#ffb070'; ctx.fillText(tx, VW / 2, 138); ctx.restore(); }
   if (frenzyT > 0) {
     const pul = (Math.sin(T * 16) * .5 + .5);
     ctx.fillStyle = `rgba(255,120,20,${.08 + pul * .08})`; ctx.fillRect(0, 0, VW, VH);
     ctx.save(); ctx.font = '44px "Lilita One", sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 8; ctx.strokeStyle = '#2a0e00';
-    const tx = `🔥 BUGZ FRENZY x3 · ${Math.ceil(frenzyT)}`; ctx.translate(VW / 2, 158); ctx.scale(1 + pul * .05, 1 + pul * .05); ctx.strokeText(tx, 0, 0); ctx.fillStyle = '#ffb347'; ctx.fillText(tx, 0, 0); ctx.restore();
+    const tx = `🔥 BUGZ FRENZY x3 · ${Math.ceil(frenzyT)}`; ctx.translate(VW / 2, 190); ctx.scale(1 + pul * .05, 1 + pul * .05); ctx.strokeText(tx, 0, 0); ctx.fillStyle = '#ffb347'; ctx.fillText(tx, 0, 0); ctx.restore();
   }
   if (flashBad > 0) { ctx.fillStyle = `rgba(255,40,70,${flashBad * .22})`; ctx.fillRect(0, 0, VW, VH); }
   if (state === 'play' && timeLeft < 10 && timeLeft > 0) { const v = (Math.sin(T * 8) * .5 + .5) * .12; ctx.fillStyle = `rgba(255,77,106,${v})`; ctx.fillRect(0, 0, VW, 8); ctx.fillRect(0, VH - 8, VW, 8); }
@@ -561,14 +609,51 @@ function render(){
 // ---------- flow
 function startGame(){
   ac(); if (AC && AC.state === 'suspended') AC.resume();
-  state = 'play'; timeLeft = 60; score = 0; shownScore = 0; combo = 0; bestCombo = 0; eggsCaught = 0; hits = 0; objs = []; nestEggs = []; parts = []; floats = []; spawnT = .6; shieldT = 0; blocked = 0; magnetT = 0; frenzyT = 0; nestCount = 0; deposits = 0; fliers = [];
+  state = 'play'; timeLeft = 60; score = 0; shownScore = 0; combo = 0; bestCombo = 0; eggsCaught = 0; hits = 0; objs = []; nestEggs = []; parts = []; floats = []; spawnT = .6; shieldT = 0; blocked = 0; magnetT = 0; frenzyT = 0; nestCount = 0; deposits = 0; fliers = []; rings = []; splats = []; input.mouse = null; topEggs = [];
   P.x = VW / 2; P.vx = 0;
-  document.getElementById('start').classList.add('hidden'); document.getElementById('over').classList.add('hidden');
+  document.getElementById('start').classList.add('hidden'); document.getElementById('over').classList.add('hidden'); hidePeek();
   SFX.start();
+}
+const LINES = {
+  legend: ["You're a VAULT LEGEND! 👑 I've never seen so many eggs!", "Unreal! The whole vault is cheering for you! 👑", "Are you even human?! LEGENDARY run! 🔥"],
+  great: ["You are the best! The vault is shining thanks to you ✨", "WOW! You're a true golden Bugz! ✨", "Amazing catch skills! I'm so proud! 🥚"],
+  good: ["Great job, nest master! You're getting really good!", "Nice run! The nest is happy! 🥚", "So good! One more round and you're a legend!"],
+  ok: ["Not bad! Keep going, you can do even better!", "Good start! Next time, aim for the golden eggs ✨", "You're getting there! Watch out for those rocks!"],
+  low: ["Oops... I believe in you! You can do better! 💪", "Don't give up! Try again, you got this! 💪", "Those rocks are tricky... let's try one more time! 🥚"]
+};
+let peekFace = 'happy', peekOn = false, peekT = 0;
+const peekCv = document.getElementById('peekCv'), pctx = peekCv.getContext('2d');
+function showPeek(newBest){
+  const tier = score >= 900 ? 'legend' : score >= 600 ? 'great' : score >= 350 ? 'good' : score >= 150 ? 'ok' : 'low';
+  const arr = LINES[tier]; let line = arr[(Math.random() * arr.length) | 0];
+  if (newBest && score > 0) line = 'NEW HIGH SCORE! 🎉 ' + line;
+  peekFace = tier === 'legend' || tier === 'great' ? 'wow' : tier === 'good' ? 'happy' : tier === 'ok' ? 'smile' : 'idle';
+  document.getElementById('bubble').textContent = line;
+  peekOn = true; peekT = 0;
+  const pk = document.getElementById('peek'), card = document.querySelector('#over .card'), wrap = document.getElementById('wrap');
+  const r = card.getBoundingClientRect(), pw = Math.min(innerWidth * .3, 250), need = pw * .42 + 300 + 16;
+  const roomRight = innerWidth - r.right, roomBelow = innerHeight - r.bottom;
+  if (roomRight >= need || roomBelow >= pw * 1.15 + 20 && innerWidth - pw * .42 - 300 > r.left + r.width / 2 && false) { pk.classList.remove('inline'); if (pk.parentElement !== wrap) wrap.appendChild(pk); }
+  else { pk.classList.add('inline'); if (pk.parentElement !== card) card.appendChild(pk); }
+  requestAnimationFrame(() => requestAnimationFrame(() => pk.classList.add('show')));
+}
+function hidePeek(){ peekOn = false; document.getElementById('peek').classList.remove('show'); }
+function drawPeek(dt){
+  if (!peekOn) return; peekT += dt;
+  const sv = { f: P.face, d: P.dir, lx: P.look.x, ly: P.look.y, b: P.blink };
+  P.face = peekFace; P.dir = -1; P.look.x = -0.9 + Math.sin(peekT * .8) * .1; P.look.y = -0.2; P.blink = sv.b;
+  withCtx(pctx, () => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, peekCv.width, peekCv.height);
+    const sc = peekCv.height / A.bugH * 1.05, bob = Math.sin(peekT * 3) * 6 + (peekFace === 'wow' || peekFace === 'happy' ? -Math.abs(Math.sin(peekT * 5)) * 10 : 0);
+    // flip so it faces left, show the face side, body runs off the right edge
+    ctx.translate(230 + 510 * sc, 40 + bob); ctx.scale(-sc, sc);
+    ctx.drawImage(IMG.bug, 0, 0, A.bugW, A.bugH); drawFace();
+  });
+  P.face = sv.f; P.dir = sv.d; P.look.x = sv.lx; P.look.y = sv.ly;
 }
 function endGame(){
   state = 'over'; frenzyT = 0; magnetT = 0; shieldT = 0;
-  let best = 0; try { best = +localStorage.getItem('bugzEggBest') || 0; if (score > best) { best = score; localStorage.setItem('bugzEggBest', best); } } catch(e) { best = Math.max(best, score); }
+  let best = 0, newBest = false; try { best = +localStorage.getItem('bugzEggBest') || 0; if (score > best) { best = score; newBest = true; localStorage.setItem('bugzEggBest', best); } } catch(e) { best = Math.max(best, score); }
   document.getElementById('finalScore').textContent = score;
   document.getElementById('fEggs').textContent = eggsCaught;
   document.getElementById('fCombo').textContent = bestCombo;
@@ -580,7 +665,7 @@ function endGame(){
   const link = gameLink();
   const msg = `I scored ${score} in BUGZ Egg Catch 🥚 — rank: ${rank}! ${eggsCaught} egg${eggsCaught === 1 ? '' : 's'} caught, best combo ${bestCombo}. Can you beat me? #UnVault #Bugz\n\n` + (link ? `🎮 Play: ${link}\n` : '') + `made by @${CREATOR}`;
   document.getElementById('shareBtn').href = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(msg);
-  setTimeout(() => document.getElementById('over').classList.remove('hidden'), 700);
+  setTimeout(() => { document.getElementById('over').classList.remove('hidden'); setTimeout(() => showPeek(newBest), 350); }, 700);
   SFX.end(); P.face = 'happy'; P.faceT = 3;
 }
 document.getElementById('playBtn').onclick = startGame;
@@ -588,6 +673,7 @@ document.getElementById('againBtn').onclick = startGame;
 
 // input
 addEventListener('keydown', e => {
+  if (['ArrowLeft', 'a', 'A', 'ArrowRight', 'd', 'D'].includes(e.key)) input.mouse = null;
   if (['ArrowLeft', 'a', 'A'].includes(e.key)) input.l = true;
   if (['ArrowRight', 'd', 'D'].includes(e.key)) input.r = true;
   if ((e.key === 'Enter' || e.key === ' ') && state !== 'play' && state !== 'paused') { e.preventDefault(); startGame(); }
@@ -599,7 +685,8 @@ addEventListener('keyup', e => {
 });
 function toWorld(cx){ const r = cv.getBoundingClientRect(); return (cx - r.left) / r.width * VW; }
 cv.addEventListener('pointerdown', e => { input.drag = toWorld(e.clientX); try { cv.setPointerCapture(e.pointerId); } catch(_) {} });
-cv.addEventListener('pointermove', e => { if (input.drag !== null) input.drag = toWorld(e.clientX); });
+cv.addEventListener('pointermove', e => { if (input.drag !== null) input.drag = toWorld(e.clientX); else if (e.pointerType === 'mouse' && state === 'play') input.mouse = toWorld(e.clientX); });
+cv.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') input.mouse = null; });
 ['pointerup', 'pointercancel'].forEach(ev => cv.addEventListener(ev, () => { input.drag = null; }));
 function togglePause(){ if (state === 'play') { state = 'paused'; document.getElementById('pause').classList.remove('hidden'); } else if (state === 'paused') { state = 'play'; document.getElementById('pause').classList.add('hidden'); } }
 addEventListener('blur', () => { input.l = input.r = false; input.drag = null; if (state === 'play') togglePause(); });
@@ -611,13 +698,13 @@ function drawIconsSafe(){
     const k = c.dataset.ico; c.width = 60; c.height = 60; const x = c.getContext('2d');
     if (k === 'egg' || k === 'gold') { const im = IMG['egg_' + (k === 'gold' ? 'gold' : 'magenta')]; const h = 56, w = im.width / im.height * h; x.drawImage(im, 30 - w / 2, 2, w, h); }
     else if (k === 'magnet') withCtx(x, () => drawMagnet({ x: 30, y: 32, r: 18, wob: 0 }));
-    else if (k === 'vault') withCtx(x, () => { const sT = T; drawVaultIcon(30, 30, 18, .7, 0); });
+    else if (k === 'vault') { const w = 56, h = A.nestH * w / 560; x.drawImage(IMG.nest_b, 2, 18, w, h); x.drawImage(IMG.egg_gold, 18, 4, 22, 28); x.drawImage(IMG.nest_f, 2, 18, w, h); }
     else { withCtx(x, () => { if (k === 'rock') drawRock({ x: 30, y: 30, r: 21, rot: .3, shape: rockShape() }); else drawCandle({ x: 30, y: 31, r: 15, wob: 0 }); }); }
   });
 }
 function withCtx(c, fn){ const saved = ctx; ctx = c; try { fn(); } finally { ctx = saved; } }
 
-window.__bugz = { get state(){ return state; } };
+window.__bugz = { get state(){ return state; }, setScore(v){ score = v; }, end(){ timeLeft = 0.01; }, get objs(){ return objs; }, get P(){ return P; }, get stats(){ return {score, eggsCaught, hits}; }, get VW(){ return VW; }, setNest(v){ nestCount = v; } };
 })();
 </script>
 </body>
